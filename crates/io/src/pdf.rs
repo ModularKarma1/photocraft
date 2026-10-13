@@ -148,7 +148,7 @@ fn import_inner(name: &str, bytes: &[u8], selected: Option<&[usize]>, options: I
     if pages.is_empty() || pages.len() > MAX_PAGES {
         return Err(error("PDF must contain between 1 and 100 pages"));
     }
-    guard::preflight(&pdf, ctl)?;
+    let inks = guard::preflight(&pdf, ctl)?;
     let dpi = options.resolution;
     let indices: Vec<usize> = match selected {
         Some(s) if s.is_empty() || s.iter().any(|&i| i >= pages.len()) => return Err(error("select at least one valid PDF page")),
@@ -208,15 +208,12 @@ fn import_inner(name: &str, bytes: &[u8], selected: Option<&[usize]>, options: I
     }
     // Layer storage is bottom-to-top; PDF order follows the top-to-bottom Layers panel.
     doc.layers.reverse();
-    Ok(ImportResult {
-        document: doc,
-        warnings: vec![format!(
-            "Imported {} PDF page(s) as raster artboards at {dpi} ppi. PDF text, vectors, forms and links are not editable objects. Save As PDF exports each artboard as a page; save .pcraft to retain editing layers. The original PDF is not overwritten automatically.",
-            indices.len()
-        )],
-        source_read_only: true,
-        preview_only: false,
-    })
+    let mut warnings = vec![format!(
+        "Imported {} PDF page(s) as raster artboards at {dpi} ppi. PDF text, vectors, forms and links are not editable objects. Save As PDF exports each artboard as a page; save .pcraft to retain editing layers. The original PDF is not overwritten automatically.",
+        indices.len()
+    )];
+    warnings.extend(inks.warnings());
+    Ok(ImportResult { document: doc, warnings, source_read_only: true, preview_only: false })
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -254,3 +254,51 @@ fn pdf_import_renders_vector_shapes_and_text_without_raster_images() {
         "standard PDF text must render as visible glyphs"
     );
 }
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn pdf_import_warns_when_cmyk_and_spot_colours_become_srgb() {
+    // Left half: DeviceCMYK black. Right half: a PANTONE spot with a CMYK alternate.
+    let content = b"0 0 0 1 k 0 0 36 36 re f /CS0 cs 1 scn 36 0 36 36 re f";
+    let objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 36] /Resources << /ColorSpace << /CS0 5 0 R >> >> /Contents 4 0 R >>".to_vec(),
+        [format!("<< /Length {} >>\nstream\n", content.len()).as_bytes(), content, b"\nendstream"].concat(),
+        b"[/Separation /PANTONE#20185#20C /DeviceCMYK << /FunctionType 2 /Domain [0 1] /C0 [0 0 0 0] /C1 [0 0.91 0.76 0] /N 1 >>]".to_vec(),
+    ];
+    let mut bytes = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, object) in objects.iter().enumerate() {
+        offsets.push(bytes.len());
+        bytes.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        bytes.extend_from_slice(object);
+        bytes.extend_from_slice(b"\nendobj\n");
+    }
+    let xref = bytes.len();
+    bytes.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
+    for offset in offsets {
+        bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    bytes.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
+
+    let imported = import("press.pdf", &bytes).unwrap();
+    let warnings = &imported.warnings;
+    assert_eq!(warnings.len(), 3, "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("PANTONE 185 C") && w.contains("Separations are not kept")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("uses CMYK colour") && w.contains("sRGB")), "{warnings:?}");
+
+    // The warnings describe the conversion; the artwork itself still renders.
+    let page = photocraft_compose::render(&imported.document, imported.document.bounds());
+    assert_eq!(imported.document.size, Size::new(144, 72));
+    let black = page.px[36 * 144 + 36];
+    assert!(black[..3].iter().all(|&v| v < 0.4), "CMYK black: {black:?}");
+    let spot = page.px[36 * 144 + 108];
+    assert!(spot[0] > spot[1] + 0.3 && spot[0] > spot[2] + 0.3, "PANTONE 185 C approximation: {spot:?}");
+
+    // RGB documents get only the general raster notice.
+    let rgb = export(&document(), "pdf", &ExportOptions::default()).unwrap().bytes;
+    let warnings = import("rgb.pdf", &rgb).unwrap().warnings;
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(!warnings[0].contains("CMYK") && !warnings[0].contains("Spot"), "{warnings:?}");
+}

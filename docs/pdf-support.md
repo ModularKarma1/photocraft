@@ -65,6 +65,9 @@ PDF text, vector objects, links, forms, annotations, and signatures are not
 preserved as editable PDF objects. These are raster image editing workflows.
 Use .pcraft for an editable layered master and PDF for the exported result.
 Password-protected PDFs must first be unlocked in a PDF editor.
+Spot colours and CMYK artwork are converted to 8-bit sRGB during rasterization;
+the import reports warnings naming the spot inks and noting that separations
+are not retained.
 
 Native import limits: 100 pages; 16,384 pixels per output side; 64 megapixels per
 rendered page; 512 megapixels total; 256 MB input file. Before rendering or previews,
